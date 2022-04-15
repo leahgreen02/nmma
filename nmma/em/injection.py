@@ -100,6 +100,9 @@ def create_light_curve_data(
 
     data = {}
 
+    if args.ztf_sampling or args.rubin_ToO or args.optimal_augmentation:
+        passbands_to_keep = []
+
     for filt in mag:
         mag_per_filt = mag[filt]
         if filt in detection_limit:
@@ -219,11 +222,21 @@ def create_light_curve_data(
                 else:
                     if row["mag"] > ztflimi.sample():
                         group.drop(idx, inplace=True)
-            df = estimate_mag_err(ztfuncer, group)
-            data_per_filt = np.vstack(
-                [group["mjd"].tolist(), group["mag"].tolist(), df["mag_err"].tolist()]
-            ).T
-            data[filt] = data_per_filt
+            if not group.empty:
+                df = group.copy()
+                df["passband"] = df["passband"].map(
+                    {"g": 1, "r": 2, "i": 3}
+                )  # estimate_mag_err maps filter numbers
+                df = estimate_mag_err(ztfuncer, df)
+                data_per_filt = np.vstack(
+                    [
+                        group["mjd"].tolist(),
+                        group["mag"].tolist(),
+                        df["mag_err"].tolist(),
+                    ]
+                ).T
+                data[filt] = data_per_filt
+                passbands_to_keep.append(filt)
 
     if args.rubin_ToO:
         start = tmin + tc
@@ -271,6 +284,7 @@ def create_light_curve_data(
             times = group["mjd"].tolist()
             data_per_filt = np.vstack([times, lc(times), lcerr(times)]).T
             data[filt] = data_per_filt
+            passbands_to_keep.append(filt)
 
     if args.optimal_augmentation:
         np.random.seed(args.optimal_augmentation_seed)
@@ -315,5 +329,11 @@ def create_light_curve_data(
             else:
                 data[filt] = np.vstack([data[filt], data_per_filt])
                 data[filt] = data[filt][data[filt][:, 0].argsort()]
+            passbands_to_keep.append(filt)
+
+    if args.ztf_sampling or args.rubin_ToO or args.optimal_augmentation:
+        passbands_to_lose = set(list(data.keys())) - set(passbands_to_keep)
+        for filt in passbands_to_lose:
+            del data[filt]
 
     return data
