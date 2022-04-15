@@ -36,15 +36,29 @@ def create_light_curve_data(
             __package__ + ".data", "ZTF_revisit_kde_i.joblib"
         ) as f:
             ztfrevisit_i = load(f)
+        with resources.open_binary(__package__ + ".data", "lims_public_g.joblib") as f:
+            ztflimg = load(f)
+        with resources.open_binary(__package__ + ".data", "lims_public_r.joblib") as f:
+            ztflimr = load(f)
+        with resources.open_binary(__package__ + ".data", "lims_i.joblib") as f:
+            ztflimi = load(f)
 
     if args.ztf_uncertainties:
         with resources.open_binary(__package__ + ".data", "ZTF_uncer_params.pkl") as f:
             ztfuncer = load(f)
     if args.ztf_ToO:
         with resources.open_binary(
-            __package__ + ".data", "sampling_toO_" + args.ztf_ToO + ".pkl"
+            __package__ + ".data", "sampling_ToO_" + args.ztf_ToO + ".pkl"
         ) as f:
             ztftoo = load(f)
+        with resources.open_binary(
+            __package__ + ".data", "lims_ToO_" + args.ztf_ToO + "_g.joblib"
+        ) as f:
+            ztftoolimg = load(f)
+        with resources.open_binary(
+            __package__ + ".data", "lims_ToO_" + args.ztf_ToO + "_r.joblib"
+        ) as f:
+            ztftoolimr = load(f)
 
     tc = injection_parameters["kilonova_trigger_time"]
     tmin = args.kilonova_tmin
@@ -96,7 +110,7 @@ def create_light_curve_data(
         ):
             det_lim = 30.0
         else:
-            det_lim = 0.0
+            det_lim = np.inf
 
         if not doAbsolute:
             mag_per_filt += 5.0 * np.log10(
@@ -157,19 +171,86 @@ def create_light_curve_data(
         while t < tmax + tc:
             sim = pd.concat([sim, pd.DataFrame([[t, 3]])])
             t += float(ztfrevisit_i.sample())
+        sim["ToO"] = False
         # toO
         if args.ztf_ToO:
+            sim_ToO = pd.DataFrame()
             start = np.random.uniform(tc, tc + 1)
             t = start
             too_samps = ztftoo.sample(np.random.choice([1, 2]))
             for i, too in too_samps.iterrows():
-                sim = pd.concat(
-                    [sim, pd.DataFrame(np.array([t + too["t"], too["bands"]]).T)]
+                sim_ToO = pd.concat(
+                    [sim_ToO, pd.DataFrame(np.array([t + too["t"], too["bands"]]).T)]
                 )
                 t += 1
+            sim_ToO["ToO"] = True
+            sim = pd.concat([sim, sim_ToO])
 
-        sim = sim.rename(columns={0: "mjd", 1: "passband"}).sort_values(by=["mjd"])
+        sim = (
+            sim.rename(columns={0: "mjd", 1: "passband"})
+            .sort_values(by=["mjd"])
+            .reset_index(drop=True)
+        )
         sim["passband"] = sim["passband"].map({1: "g", 2: "r", 3: "i"})
+
+        for filt, group in sim.groupby("passband"):
+            data_per_filt = copy.deepcopy(data_original[filt])
+            lc = interp1d(
+                data_per_filt[:, 0],
+                data_per_filt[:, 1],
+                fill_value=np.inf,
+                bounds_error=False,
+                assume_sorted=True,
+            )
+            group["mag"] = lc(group["mjd"].tolist())
+            for idx, row in group.iterrows():
+                if filt == "g" and row["ToO"] is False:
+                    if row["mag"] > ztflimg.sample():
+                        group.drop(idx, inplace=True)
+                elif filt == "g" and row["ToO"] is True:
+                    if row["mag"] > ztftoolimg.sample():
+                        group.drop(idx, inplace=True)
+                elif filt == "r" and row["ToO"] is False:
+                    if row["mag"] > ztflimr.sample():
+                        group.drop(idx, inplace=True)
+                elif filt == "r" and row["ToO"] is True:
+                    if row["mag"] > ztftoolimr.sample():
+                        group.drop(idx, inplace=True)
+                else:
+                    if row["mag"] > ztflimi.sample():
+                        group.drop(idx, inplace=True)
+            df = estimate_mag_err(ztfuncer, group)
+            data_per_filt = np.vstack(
+                [group["mjd"].tolist(), group["mag"].tolist(), df["mag_err"].tolist()]
+            ).T
+            data[filt] = data_per_filt
+
+    if args.rubin_ToO:
+        start = tmin + tc
+        if args.rubin_ToO_type == "BNS":
+            strategy = [
+                [1 / 24.0, ["u", "g", "r", "i", "z", "y"]],
+                [2 / 24.0, ["u", "g", "r", "i", "z", "y"]],
+                [4 / 24.0, ["u", "g", "r", "i", "z", "y"]],
+                [1.0, ["g", "z", "i"]],
+            ]
+        elif args.rubin_ToO_type == "NSBH":
+            strategy = [
+                [1 / 24.0, ["u", "g", "r", "i", "z", "y"]],
+                [4 / 24.0, ["u", "g", "r", "i", "z", "y"]],
+                [1.0, ["u", "g", "r", "i", "z", "y"]],
+                [2.0, ["g", "z", "i"]],
+            ]
+        else:
+            raise ValueError("args.rubin_ToO_type should be either BNS or NSBH")
+
+        mjds, passbands = [], []
+        sim = pd.DataFrame()
+        for (obstime, filts) in strategy:
+            for filt in filts:
+                mjds.append(tc + obstime)
+                passbands.append(filt)
+        sim = pd.DataFrame.from_dict({"mjd": mjds, "passband": passbands})
 
         for filt, group in sim.groupby("passband"):
             data_per_filt = copy.deepcopy(data_original[filt])
