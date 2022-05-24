@@ -67,7 +67,16 @@ class OpticalLightCurve(Likelihood):
         self.trigger_time = trigger_time
         self.tmin = tmin
         self.tmax = tmax
-        self.error_budget = error_budget
+        if isinstance(error_budget, (int, float, complex)) and not isinstance(
+            error_budget, bool
+        ):
+            self.error_budget = dict(zip(filters, [error_budget] * len(filters)))
+        elif isinstance(error_budget, dict):
+            for filt in self.filters:
+                if filt not in error_budget:
+                    raise ValueError(f"filter {filt} missing from error_budget")
+            self.error_budget = error_budget
+
         processedData = utils.dataProcess(
             light_curve_data, self.filters, self.trigger_time, self.tmin, self.tmax
         )
@@ -110,9 +119,12 @@ class OpticalLightCurve(Likelihood):
         mag_app_interp = {}
         for filt in self.filters:
             mag_abs_filt = utils.getFilteredMag(mag_abs, filt)
-            mag_app_filt = mag_abs_filt + 5.0 * np.log10(
-                self.parameters["luminosity_distance"] * 1e6 / 10.0
-            )
+            if self.parameters["luminosity_distance"] > 0.0:
+                mag_app_filt = mag_abs_filt + 5.0 * np.log10(
+                    self.parameters["luminosity_distance"] * 1e6 / 10.0
+                )
+            else:
+                mag_app_filt = mag_abs_filt
             usedIdx = np.where(np.isfinite(mag_app_filt))[0]
             sample_times_used = self.sample_times[usedIdx]
             mag_app_used = mag_app_filt[usedIdx]
@@ -134,7 +146,7 @@ class OpticalLightCurve(Likelihood):
             data_sigma = self.light_curve_data[filt][:, 2]
 
             # include the error budget into calculation
-            data_sigma = np.sqrt(data_sigma ** 2 + self.error_budget ** 2)
+            data_sigma = np.sqrt(data_sigma ** 2 + self.error_budget[filt] ** 2)
 
             # evaluate the light curve magnitude at the data points
             mag_est = mag_app_interp[filt](data_time)

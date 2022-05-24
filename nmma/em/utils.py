@@ -118,12 +118,15 @@ def getRedShift(parameters):
     if "redshift" in parameters:
         z = parameters["redshift"]
     else:
-        z = z_at_value(
-            Planck15.luminosity_distance,
-            parameters["luminosity_distance"] * astropy.units.Mpc,
-            zmin=0.0,
-            zmax=2.0,
-        )
+        if parameters["luminosity_distance"] > 0:
+            z = z_at_value(
+                Planck15.luminosity_distance,
+                parameters["luminosity_distance"] * astropy.units.Mpc,
+                zmin=0.0,
+                zmax=2.0,
+            )
+        else:
+            z = 0.0
     return z
 
 
@@ -229,24 +232,98 @@ def loadEventSpec(filename):
     return spec
 
 
-def read_files(files, filters=None):
+def read_spectroscopy_files(
+    files, wavelength_min=3000.0, wavelength_max=10000.0, smooth=False
+):
 
     data = {}
     for filename in files:
-        name = filename.replace(".txt", "").replace(".dat", "").split("/")[-1]
-        mag_d = np.loadtxt(filename)
+        name = (
+            filename.replace("_spec", "")
+            .replace(".spec", "")
+            .replace(".txt", "")
+            .replace(".dat", "")
+            .split("/")[-1]
+        )
+        df = pd.read_csv(filename, names=["wavelength", "time", "fnu"])
+        df_group = df.groupby("time")
+
+        t_d = []
+        lambda_d = []
+        spec_d = []
+        for ii, (tt, group) in enumerate(df_group):
+            t_d.append(tt)
+            if ii == 0:
+                lambda_d = group["wavelength"].to_numpy()
+                jj = np.where(
+                    (lambda_d >= wavelength_min) & ((lambda_d <= wavelength_max))
+                )[0]
+                lambda_d = lambda_d[jj]
+            spec = group["fnu"].to_numpy()[jj]
+            if smooth:
+                spec = scipy.signal.medfilt(spec, kernel_size=9)
+            spec_d.append(spec)
 
         data[name] = {}
-        data[name]["t"] = mag_d[:, 0]
-        data[name]["u"] = mag_d[:, 1]
-        data[name]["g"] = mag_d[:, 2]
-        data[name]["r"] = mag_d[:, 3]
-        data[name]["i"] = mag_d[:, 4]
-        data[name]["z"] = mag_d[:, 5]
-        data[name]["y"] = mag_d[:, 6]
-        data[name]["J"] = mag_d[:, 7]
-        data[name]["H"] = mag_d[:, 8]
-        data[name]["K"] = mag_d[:, 9]
+        data[name]["t"] = np.array(t_d)
+        data[name]["lambda"] = np.array(lambda_d)
+        data[name]["fnu"] = np.array(spec_d)
+
+    return data
+
+
+def read_photometry_files(files, filters=None, tt=np.linspace(0, 14, 100)):
+
+    data = {}
+    for filename in files:
+        name = (
+            filename.replace(".csv", "")
+            .replace(".txt", "")
+            .replace(".dat", "")
+            .split("/")[-1]
+        )
+
+        # ZTF rest style file
+        if "forced.csv" in filename or "alerts.csv" in filename:
+            df = pd.read_csv(filename)
+            idx = np.where(df["mag_unc"] != 99.0)[0]
+            if len(idx) < 2:
+                print(f"{name} does not have enough detections to interpolate.")
+                continue
+
+            jd_min = df["jd"].iloc[idx[0]]
+
+            data[name] = {}
+            data[name]["t"] = tt
+            for filt in ["u", "g", "r", "i", "z", "y", "J", "H", "K"]:
+                data[name][filt] = np.nan * tt
+
+            for filt, group in df.groupby("filter"):
+                idx = np.where(group["mag_unc"] != 99.0)[0]
+                if len(idx) < 2:
+                    continue
+                lc = interp.interp1d(
+                    group["jd"].iloc[idx] - jd_min,
+                    group["mag"].iloc[idx],
+                    fill_value=np.nan,
+                    bounds_error=False,
+                    assume_sorted=True,
+                )
+                data[name][filt] = lc(tt)
+        else:
+            mag_d = np.loadtxt(filename)
+
+            data[name] = {}
+            data[name]["t"] = mag_d[:, 0]
+            data[name]["u"] = mag_d[:, 1]
+            data[name]["g"] = mag_d[:, 2]
+            data[name]["r"] = mag_d[:, 3]
+            data[name]["i"] = mag_d[:, 4]
+            data[name]["z"] = mag_d[:, 5]
+            data[name]["y"] = mag_d[:, 6]
+            data[name]["J"] = mag_d[:, 7]
+            data[name]["H"] = mag_d[:, 8]
+            data[name]["K"] = mag_d[:, 9]
 
         if filters is not None:
             filters_to_remove = set(list(data[name].keys())) - set(filters + ["t"])
@@ -264,9 +341,9 @@ def calc_lc(
     mag_ncoeff=None,
     lbol_ncoeff=None,
     interpolation_type="sklearn_gp",
+    filters=["u", "g", "r", "i", "z", "y", "J", "H", "K"],
 ):
 
-    filters = ["u", "g", "r", "i", "z", "y", "J", "H", "K"]
     mAB = {}
     for jj, filt in enumerate(filters):
         if mag_ncoeff:
@@ -292,7 +369,26 @@ def calc_lc(
             model = svd_mag_model[filt]["model"]
             cAproj = model.predict(np.atleast_2d(param_list_postprocess)).T.flatten()
             cAstd = np.ones((n_coeff,))
+        elif interpolation_type == "api_gp":
+            seed = 32
+            random_state = np.random.RandomState(seed)
 
+            gps = svd_mag_model[filt]["gps"]
+            cAproj = np.zeros((n_coeff,))
+            cAstd = np.zeros((n_coeff,))
+            for i in range(n_coeff):
+                gp = gps[i]
+                y_pred = gp.mean(np.atleast_2d(param_list_postprocess))
+                y_samples_test = gp.rvs(
+                    100,
+                    np.atleast_2d(param_list_postprocess),
+                    random_state=random_state,
+                )
+                y_90_lo_test, y_90_hi_test = np.percentile(
+                    y_samples_test, [5, 95], axis=1
+                )
+                cAproj[i] = y_pred
+                cAstd[i] = y_90_hi_test - y_90_lo_test
         else:
             gps = svd_mag_model[filt]["gps"]
             cAproj = np.zeros((n_coeff,))

@@ -37,6 +37,8 @@ model_parameters_dict = {
     "Me2017": ["log10_Mej", "log10_vej", "beta", "log10_kappa_r"],
     "Bu2022mv": ["log10_mej_dyn", "vej_dyn", "log10_mej_wind", "vej_wind", "KNtheta"],
     "PL_BB_fixedT": ["bb_luminosity", "temperature", "beta", "powerlaw_mag"],
+    "CV": ["example_num"],
+    "AnBa2022_sparse": ["mrp", "xmix"],
 }
 
 
@@ -45,11 +47,12 @@ class GenericCombineLightCurveModel(object):
         self.models = models
         self.sample_times = sample_times
 
-    def generate_lightcurve(self, sample_times, parameters):
+    def generate_lightcurve(self, sample_times, parameters, return_all=False):
 
         total_lbol = np.zeros(len(sample_times))
         total_mag = {}
         mag_per_model = []
+        lbol_per_model = []
 
         for model in self.models:
             lbol, mag = model.generate_lightcurve(sample_times, parameters)
@@ -60,6 +63,7 @@ class GenericCombineLightCurveModel(object):
             else:
                 total_lbol += lbol
                 mag_per_model.append(mag)
+                lbol_per_model.append(lbol)
 
         filts = mag_per_model[0].keys()  # just get the first one
 
@@ -70,7 +74,10 @@ class GenericCombineLightCurveModel(object):
 
             total_mag[filt] = -5.0 / 2.0 * logsumexp(mAB_list, axis=0) / ln10
 
-        return total_lbol, total_mag
+        if return_all:
+            return lbol_per_model, mag_per_model
+        else:
+            return total_lbol, total_mag
 
 
 class SVDLightCurveModel(object):
@@ -151,6 +158,19 @@ class SVDLightCurveModel(object):
                 )
                 with open(lbol_modelfile, "rb") as handle:
                     self.svd_lbol_model = pickle.load(handle)
+        elif self.interpolation_type == "api_gp":
+            from .training import load_api_gp_model
+
+            modelfile = os.path.join(self.svd_path, "{0}_api.pkl".format(model))
+            if os.path.isfile(modelfile):
+                with open(modelfile, "rb") as handle:
+                    self.svd_mag_model = pickle.load(handle)
+                for filt in self.svd_mag_model.keys():
+                    for ii in range(len(self.svd_mag_model[filt]["gps"])):
+                        self.svd_mag_model[filt]["gps"][ii] = load_api_gp_model(
+                            self.svd_mag_model[filt]["gps"][ii]
+                        )
+                self.svd_lbol_model = None
         elif self.interpolation_type == "tensorflow":
             import tensorflow as tf
 
@@ -198,8 +218,9 @@ class SVDLightCurveModel(object):
 
     def observation_angle_conversion(self, parameters):
         if "KNtheta" not in parameters:
-            parameters["KNtheta"] = parameters["inclination_EM"] * 180.0 / np.pi
-
+            parameters["KNtheta"] = (
+                parameters.get("inclination_EM", 0.0) * 180.0 / np.pi
+            )
         return parameters
 
     def generate_lightcurve(self, sample_times, parameters):
@@ -231,6 +252,34 @@ class SVDLightCurveModel(object):
             mag[filt] -= 2.5 * np.log10(1.0 + z)
 
         return lbol, mag
+
+    def generate_spectra(self, sample_times, wavelengths, parameters):
+        if self.parameter_conversion:
+            new_parameters = parameters.copy()
+            new_parameters, _ = self.parameter_conversion(new_parameters)
+        else:
+            new_parameters = parameters.copy()
+
+        new_parameters = self.observation_angle_conversion(new_parameters)
+
+        parameters_list = []
+        for parameter_name in self.model_parameters:
+            parameters_list.append(new_parameters[parameter_name])
+
+        z = utils.getRedShift(new_parameters)
+
+        _, _, spec = utils.calc_lc(
+            sample_times / (1.0 + z),
+            parameters_list,
+            svd_mag_model=self.svd_mag_model,
+            svd_lbol_model=self.svd_lbol_model,
+            mag_ncoeff=self.mag_ncoeff,
+            lbol_ncoeff=self.lbol_ncoeff,
+            interpolation_type=self.interpolation_type,
+            filters=wavelengths,
+        )
+
+        return spec
 
 
 class GRBLightCurveModel(object):

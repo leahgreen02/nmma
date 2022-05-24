@@ -119,9 +119,9 @@ def main():
     )
     parser.add_argument(
         "--error-budget",
-        type=float,
-        default=1.0,
-        help="Additionaly statistical error (mag) to be introduced (default: 1)",
+        type=str,
+        default="1.0",
+        help="Additional systematic error (mag) to be introduced (default: 1)",
     )
     parser.add_argument(
         "--sampler",
@@ -213,6 +213,18 @@ def main():
         help="Type of ToO observation. Won't work w/o --rubin-ToO",
         type=str,
         choices=["BNS", "NSBH"],
+    )
+    parser.add_argument(
+        "--xlim",
+        type=str,
+        default="0,14",
+        help="Start and end time for light curve plot (default: 0-14)",
+    )
+    parser.add_argument(
+        "--ylim",
+        type=str,
+        default="22,16",
+        help="Upper and lower magnitude limit for light curve plot (default: 22-16)",
     )
     parser.add_argument(
         "--generation-seed",
@@ -430,29 +442,31 @@ def main():
             lc = lc.reset_index(drop=True)
             lc.to_csv(args.injection_outfile)
 
-        if args.remove_nondetections:
-            filters_to_check = list(data.keys())
-            for filt in filters_to_check:
-                idx = np.where(np.isfinite(data[filt][:, 2]))[0]
-                data[filt] = data[filt][idx, :]
-                if len(idx) == 0:
-                    del data[filt]
-
-        # check for detections
-        detection = False
-        for filt in data.keys():
-            idx = np.where(np.isfinite(data[filt][:, 2]))[0]
-            if len(idx) > 0:
-                detection = True
-                break
-        if not detection:
-            raise ValueError("Need at least one detection to do fitting.")
     else:
         # load the kilonova afterglow data
         data = loadEvent(args.data)
 
         trigger_time = args.trigger_time
 
+    if args.remove_nondetections:
+        filters_to_check = list(data.keys())
+        for filt in filters_to_check:
+            idx = np.where(np.isfinite(data[filt][:, 2]))[0]
+            data[filt] = data[filt][idx, :]
+            if len(idx) == 0:
+                del data[filt]
+
+    # check for detections
+    detection = False
+    for filt in data.keys():
+        idx = np.where(np.isfinite(data[filt][:, 2]))[0]
+        if len(idx) > 0:
+            detection = True
+            break
+    if not detection:
+        raise ValueError("Need at least one detection to do fitting.")
+
+    error_budget = [float(x) for x in args.error_budget.split(",")]
     if args.filters:
         if args.optimal_augmentation_filters:
             filters = list(
@@ -465,10 +479,23 @@ def main():
             filters = args.filters.split(",")
 
         filters_to_analyze = list(set(filters).intersection(set(list(data.keys()))))
+
+        if len(error_budget) == 1:
+            error_budget = dict(
+                zip(filters_to_analyze, error_budget * len(filters_to_analyze))
+            )
+        elif len(args.filters.split(",")) == len(error_budget):
+            error_budget = dict(zip(args.filters.split(","), error_budget))
+        else:
+            raise ValueError("error_budget must be the same length as filters")
+
     else:
         filters_to_analyze = list(data.keys())
+        error_budget = dict(
+            zip(filters_to_analyze, error_budget * len(filters_to_analyze))
+        )
 
-    print("Running with filters {0}".format(filters))
+    print("Running with filters {0}".format(filters_to_analyze))
     # setup the prior
     priors = bilby.gw.prior.PriorDict(args.prior)
 
@@ -498,7 +525,7 @@ def main():
         trigger_time=trigger_time,
         tmin=args.tmin,
         tmax=args.tmax,
-        error_budget=args.error_budget,
+        error_budget=error_budget,
         verbose=args.verbose,
         detection_limit=args.detection_limit,
     )
@@ -567,10 +594,24 @@ def main():
         #########################
         _, mag = light_curve_model.generate_lightcurve(sample_times, bestfit_params)
         for filt in mag.keys():
-            mag[filt] += 5.0 * np.log10(
-                bestfit_params["luminosity_distance"] * 1e6 / 10.0
-            )
+            if bestfit_params["luminosity_distance"] > 0:
+                mag[filt] += 5.0 * np.log10(
+                    bestfit_params["luminosity_distance"] * 1e6 / 10.0
+                )
         mag["bestfit_sample_times"] = sample_times
+
+        if len(models) > 1:
+            _, mag_all = light_curve_model.generate_lightcurve(
+                sample_times, bestfit_params, return_all=True
+            )
+
+            for ii in range(len(mag_all)):
+                for filt in mag_all[ii].keys():
+                    if bestfit_params["luminosity_distance"] > 0:
+                        mag_all[ii][filt] += 5.0 * np.log10(
+                            bestfit_params["luminosity_distance"] * 1e6 / 10.0
+                        )
+            model_colors = cm.Spectral(np.linspace(0, 1, len(models)))[::-1]
 
         filters_plot = []
         for filt in filters:
@@ -612,7 +653,6 @@ def main():
                 fmt="o",
                 color="k",
                 markersize=16,
-                label="%s-band" % filt,
             )  # or color=color
 
             idx = np.where(~np.isfinite(sigma_y))[0]
@@ -623,28 +663,61 @@ def main():
             mag_plot = getFilteredMag(mag, filt)
 
             plt.plot(sample_times, mag_plot, color=color2, linewidth=3, linestyle="--")
-            plt.fill_between(
-                sample_times,
-                mag_plot + args.error_budget,
-                mag_plot - args.error_budget,
-                facecolor=color2,
-                alpha=0.2,
-            )
+
+            if len(models) > 1:
+                plt.fill_between(
+                    sample_times,
+                    mag_plot + error_budget[filt],
+                    mag_plot - error_budget[filt],
+                    facecolor=color2,
+                    alpha=0.2,
+                    label="Combined",
+                )
+            else:
+                plt.fill_between(
+                    sample_times,
+                    mag_plot + error_budget[filt],
+                    mag_plot - error_budget[filt],
+                    facecolor=color2,
+                    alpha=0.2,
+                )
+
+            if len(models) > 1:
+                for ii in range(len(mag_all)):
+                    mag_plot = getFilteredMag(mag_all[ii], filt)
+                    plt.plot(
+                        sample_times,
+                        mag_plot,
+                        color=color2,
+                        linewidth=3,
+                        linestyle="--",
+                    )
+                    plt.fill_between(
+                        sample_times,
+                        mag_plot + error_budget[filt],
+                        mag_plot - error_budget[filt],
+                        facecolor=model_colors[ii],
+                        alpha=0.2,
+                        label=models[ii].model,
+                    )
 
             plt.ylabel("%s" % filt, fontsize=48, rotation=0, labelpad=40)
 
-            if args.injection:
-                plt.xlim([0.0, 10.0])
-                plt.ylim([26.0, 18.0])
-            else:
-                plt.xlim([0.0, 14.0])
-                plt.ylim([20.0, 14.0])
+            plt.xlim([float(x) for x in args.xlim.split(",")])
+            plt.ylim([float(x) for x in args.ylim.split(",")])
             plt.grid()
 
             if cnt == 1:
                 ax1.set_yticks([26, 22, 18, 14])
                 plt.setp(ax1.get_xticklabels(), visible=False)
-                # l = plt.legend(loc="upper right",prop={'size':36},numpoints=1,shadow=True, fancybox=True)
+                if len(models) > 1:
+                    plt.legend(
+                        loc="upper right",
+                        prop={"size": 18},
+                        numpoints=1,
+                        shadow=True,
+                        fancybox=True,
+                    )
             elif not cnt == len(filters):
                 plt.setp(ax2.get_xticklabels(), visible=False)
             plt.xticks(fontsize=36)
