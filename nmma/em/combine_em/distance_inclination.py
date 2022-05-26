@@ -5,66 +5,72 @@ import pandas as pd
 from gwpy.table import Table
 from combine_em_utils import KDE_multiply, logit
 
-samples1 = Table.read('../../../outdir/injection_posterior_samples.dat', format="csv", delimiter=" ")
-D1 = samples1['luminosity_distance']
-i1 = np.cos(samples1['inclination_EM'])
 
-samples2 = Table.read('../../../outdir2/injection_posterior_samples.dat', format="csv", delimiter=" ")
-D2 = samples2['luminosity_distance']
-i2 = np.cos(samples2['inclination_EM'])
-
-em_list = ['', '1', '2', '3', '4', '10']
-
-def combine_em(original_KDE, EM_event, D_range = [0,1000], i_range = [0,1], transform_type=logit)
+def combine_EM_events(original_KDE, EM_event, D_range = [0,1000], i_range = [0,1], transform_type=logit, save_hist=False):
     '''
     '''
     D = EM_event['luminosity_distance']
-    i = np.cos(EM_event['inclination_EM'])
+    i = EM_event['inclination_EM']
+
+    D_original = original_KDE['luminosity_distance']
+    i_original = original_KDE['inclination_EM']
+
+    print(np.min(i), np.max(i), np.mean(i), np.median(i))
+    print('-------------')
+    print(np.min(i_original), np.max(i_original), np.mean(i_original), np.median(i_original))
 
     D_transform, D_prior = logit(D, D_range, include_prior=True)
     i_transform, i_prior = logit(i, i_range, include_prior=True) 
+    D_original_transform = logit(D_original, D_range)
+    i_original_transform = logit(i_original, i_range)
 
+    D_kde_transform = scipy.stats.gaussian_kde(D_transform, weights=1/D_prior)
+    D_kde_original = scipy.stats.gaussian_kde(D_original_transform)
+    i_kde_transform = scipy.stats.gaussian_kde(i_transform, weights=1/i_prior)
+    i_kde_original = scipy.stats.gaussian_kde(i_original_transform)
 
+    D_jkde = KDE_multiply(D_kde_transform, D_kde_original)
+    i_jkde = KDE_multiply(i_kde_transform, i_kde_original)
 
+    D_transform_resam = D_jkde.resample(len(D))
+    i_transform_resam = i_jkde.resample(len(D))
 
+    D_resam = logit(D_transform_resam, D_range, inv_transform=True)
+    i_resam = logit(i_transform_resam, i_range, inv_transform=True) 
+    
+    if save_hist:
+        D_hist = plt.hist(D_resam)
+        plt.savefig('./output/D_hist.png')
+        plt.close()
+        i_hist = plt.hist(i_resam)
+        plt.savefig('./output/i_hist.png')
+        plt.close()
 
-for n in em_list:
-    samples1 = Table.read('../../../outdir/injection_posterior_samples.dat', format="csv", delimiter=" ")
-D1 = samples1['luminosity_distance']
-i1 = np.cos(samples1['inclination_EM'])
+    return D_resam.flatten(), i_resam.flatten()
 
-# add config file
-Dmin = 0
-Dmax = 1000
-imin = 0
-imax = 1
+def run_event_combination(EM_event_files, save_hist=False):
+    '''
+    '''
+    original_KDE = EM_event_files[0]
+    for n, event in enumerate(EM_event_files[1:]):
+        print('Combining events '+str(n+1)+' and '+str(n+2))
+        D, i = combine_EM_events(original_KDE, event)
+        original_KDE = {'luminosity_distance': D, 'inclination_EM': i}
 
-il1 = np.log((i1)/(1-i1))
-il2 = np.log((i2)/(1-i2))
-Dl1 = np.log((D1-Dmin)/(Dmax-D1))
-Dl2 = np.log((D2-Dmin)/(Dmax-D2))
+    if save_hist:
+        D_hist = plt.hist(D)
+        plt.savefig('./output/D_hist.png')
+        plt.close()
+        i_hist = plt.hist(i)
+        plt.savefig('./output/i_hist.png')
+        plt.close()
 
-prior_i = np.exp(il1)/(1+np.exp(il1))*(1-np.exp(il1)/(1+np.exp(il1)))
-prior_D = np.exp(Dl1)/(1+np.exp(Dl1))*(1-np.exp(Dl1)/(1+np.exp(Dl1)))
+samples1 = Table.read('../../../outdir/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples1['inclination_EM'] = np.cos(samples1['inclination_EM'])
 
-D_kde1 = scipy.stats.gaussian_kde(Dl1,weights=1/prior_D)
-D_kde2 = scipy.stats.gaussian_kde(Dl2)
-i_kde1 = scipy.stats.gaussian_kde(il1,weights=1/prior_i)
-i_kde2 = scipy.stats.gaussian_kde(il2)
+samples2 = Table.read('../../../outdir2/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples2['inclination_EM'] = np.cos(samples2['inclination_EM'])
 
-D_jkde = KDE_multiply(D_kde1, D_kde2)
-i_jkde = KDE_multiply(i_kde1, i_kde2)
+em_list = ['', '1', '2', '3', '4', '10']
 
-resam_size = 10000
-il_resam = i_jkde.resample(resam_size)
-Dl_resam = D_jkde.resample(resam_size)
-
-i_resam = (imax*np.exp(il_resam.flatten())+imin)/(1+np.exp(il_resam.flatten()))
-D_resam = (Dmax*np.exp(Dl_resam.flatten())+Dmin)/(1+np.exp(Dl_resam.flatten()))
-
-i_hist = plt.hist(i_resam) 
-plt.savefig('./output/i_hist.png')
-plt.close()
-D_hist = plt.hist(D_resam) 
-plt.savefig('./output/D_hist.png')
-plt.close()
+run_event_combination([samples1, samples2], save_hist=True)

@@ -17,7 +17,7 @@ def logit(data, bounds, inv_transform=False, include_prior=False):
         transform = (bounds[1]*np.exp(data)+bounds[0])/(1+np.exp(data))
     return transform
 
-def logit_prior(logit_data)
+def logit_prior(logit_data):
     '''
     '''
     prior = np.exp(logit_data)/(1+np.exp(logit_data))*(1-np.exp(logit_data)/(1+np.exp(logit_data))) 
