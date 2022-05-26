@@ -4,7 +4,7 @@ import numpy as np
 import scipy.stats
 import warnings
 
-def logit(data, bounds, inv_transform=False, include_prior=False)
+def logit(data, bounds, inv_transform=False, include_prior=False):
     '''Use include prior = True to include the logit transform prior
     '''
     if not inv_transform:
