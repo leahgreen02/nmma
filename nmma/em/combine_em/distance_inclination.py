@@ -6,7 +6,7 @@ from gwpy.table import Table
 from combine_em_utils import KDE_multiply, logit
 
 
-def combine_EM_events(original_KDE, EM_event, D_range = [0,1000], i_range = [0,1], transform_type=logit, save_hist=False):
+def combine_EM_events(original_KDE, EM_event, D_range = [0,1000], i_range = [0,1], transform_type=logit):
     '''
     '''
     D = EM_event['luminosity_distance']
@@ -33,9 +33,10 @@ def combine_EM_events(original_KDE, EM_event, D_range = [0,1000], i_range = [0,1
     D_kde_original = original_KDE['luminosity_distance']
     i_kde_original = original_KDE['cos_inclination_EM']
 
-    D_jkde = KDE_multiply(D_kde_transform, D_kde_original)
-    i_jkde = KDE_multiply(i_kde_transform, i_kde_original)
+    D_joint_kde = KDE_multiply(D_kde_transform, D_kde_original)
+    i_joint_kde = KDE_multiply(i_kde_transform, i_kde_original)
 
+    '''
     D_transform_resam = D_jkde.resample(len(D))
     i_transform_resam = i_jkde.resample(len(D))
 
@@ -49,23 +50,30 @@ def combine_EM_events(original_KDE, EM_event, D_range = [0,1000], i_range = [0,1
         i_hist = plt.hist(i_resam)
         plt.savefig('./output/i_hist.png')
         plt.close()
+    '''
 
-    return D_resam.flatten(), i_resam.flatten()
+    return D_joint_kde, i_joint_kde
 
-def run_event_combination(EM_event_files, save_hist=False):
+def run_event_combination(EM_event_files, save_hist=False, N_hist = 1000):
     '''
     '''
     original_KDE = EM_event_files[0]
     for n, event in enumerate(EM_event_files[1:]):
         print('Combining events '+str(n+1)+' and '+str(n+2))
-        D, i = combine_EM_events(original_KDE, event)
-        original_KDE = {'luminosity_distance': D, 'inclination_EM': i}
+        D_kde, i_kde = combine_EM_events(original_KDE, event)
+        original_KDE = {'luminosity_distance': D_kde, 'cos_inclination_EM': i_kde}
+
+    D_transform_resam = D_kde.resample(N_hist)
+    i_transform_resam = i_kde.resample(N_hist)
+
+    D_resam = logit(D_transform_resam, D_range, inv_transform=True)
+    i_resam = logit(i_transform_resam, i_range, inv_transform=True)
 
     if save_hist:
-        plt.hist(D, bins = 20)
+        D_hist = plt.hist(D_resam)
         plt.savefig('./output/D_hist.png')
         plt.close()
-        plt.hist(i, bins = 20)
+        i_hist = plt.hist(i_resam)
         plt.savefig('./output/i_hist.png')
         plt.close()
 
@@ -76,15 +84,14 @@ samples1['cos_inclination_EM'] = np.cos(samples1['inclination_EM'])
 samples2 = Table.read('../../../outdir2/injection_posterior_samples.dat', format="csv", delimiter=" ")
 samples2['cos_inclination_EM'] = np.cos(samples2['inclination_EM'])
 
+samples3 = Table.read('../../../outdir3/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples3['cos_inclination_EM'] = np.cos(samples3['inclination_EM'])
+
+samples4 = Table.read('../../../outdir4/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples4['cos_inclination_EM'] = np.cos(samples4['inclination_EM'])
+
 D = samples1['luminosity_distance']
 i = samples1['cos_inclination_EM']
-
-plt.hist(D, bins = 20)
-plt.savefig('./output/D_initial_hist.png')
-plt.close()
-plt.hist(i, bins = 20)
-plt.savefig('./output/i_initial_hist.png')
-plt.close()
 
 D_range = [0,1000] 
 i_range = [0,1]
@@ -99,6 +106,7 @@ original_KDE = {}
 original_KDE['luminosity_distance'] = D_kde_transform
 original_KDE['cos_inclination_EM'] = i_kde_transform
 
-em_list = ['', '1', '2', '3', '4', '10']
+#em_list = ['', '1', '2', '3', '4', '10']
+event_list = [original_KDE, samples2, samples3, samples4]
 
-run_event_combination([original_KDE, samples2], save_hist=True)
+run_event_combination(event_list, save_hist=True)
