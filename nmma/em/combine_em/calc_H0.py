@@ -1,4 +1,5 @@
 import numpy as np
+from astropy.cosmology import Planck18
 from astropy import units as u
 from astropy.coordinates import Distance
 import matplotlib.pyplot as plt
@@ -14,6 +15,9 @@ from bilby.gw.conversion import luminosity_distance_to_redshift
 c = 3e5 # km/s
 # z ~ H0 * D / c
 # H0 = z * c /D
+H_true = Planck18.H(0)
+print(H_true)
+
 
 def combine_EM_events(original_KDE, EM_event, H_range = [0,150], D_range = [0,200], i_range = [0,1], transform_type=logit, downsample=True):
     '''
@@ -21,7 +25,7 @@ def combine_EM_events(original_KDE, EM_event, H_range = [0,150], D_range = [0,20
     D = EM_event['luminosity_distance']
     i = EM_event['cos_inclination_EM']
 
-    z = np.array(luminosity_distance_to_redshift(D))
+    z = np.array(luminosity_distance_to_redshift(D, cosmology=Planck18))
 
     H = z * c / D
 
@@ -86,6 +90,7 @@ def run_event_combination(EM_event_files, save_hist=False, N_hist = 1000):
         plt.close()
     return D_resam.flatten(), i_resam.flatten(), H_resam.flatten()
 
+'''
 samples1 = Table.read('../../../outdir/injection_posterior_samples.dat', format="csv", delimiter=" ")
 samples1['cos_inclination_EM'] = np.cos(samples1['inclination_EM'])
 
@@ -96,6 +101,19 @@ samples3 = Table.read('../../../outdir3/injection_posterior_samples.dat', format
 samples3['cos_inclination_EM'] = np.cos(samples3['inclination_EM'])
 
 samples4 = Table.read('../../../outdir4/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples4['cos_inclination_EM'] = np.cos(samples4['inclination_EM'])
+'''
+
+samples1 = Table.read('../../../outdir_new1/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples1['cos_inclination_EM'] = np.cos(samples1['inclination_EM'])
+
+samples2 = Table.read('../../../outdir_new2/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples2['cos_inclination_EM'] = np.cos(samples2['inclination_EM'])
+
+samples3 = Table.read('../../../outdir_new3/injection_posterior_samples.dat', format="csv", delimiter=" ")
+samples3['cos_inclination_EM'] = np.cos(samples3['inclination_EM'])
+
+samples4 = Table.read('../../../outdir_new4/injection_posterior_samples.dat', format="csv", delimiter=" ")
 samples4['cos_inclination_EM'] = np.cos(samples4['inclination_EM'])
 
 D = samples1['luminosity_distance']
@@ -140,7 +158,7 @@ original_KDE['H0'] = H_kde_transform
 event_list = [original_KDE, samples2, samples3, samples4]
 #event_list = [original_KDE, samples1, samples2]
 
-D_combined, i_combined, H_combined = run_event_combination(event_list, N_hist=3619, save_hist=True)
+D_combined, i_combined, H_combined = run_event_combination(event_list, N_hist=len(D), save_hist=True)
 tab = Table([D_combined, D], names=['Combined Events', 'Event1'])
 
 plt.hist(D, alpha=.5, label = 'Event1')
@@ -186,6 +204,7 @@ plt.close()
 plt.hist([H, H2, H3, H4, H_combined], alpha=.8, bins = 30, stacked = True, density=True, label = ['Event1', 'Event2', 'Event3', 'Event4', 'Combined'])
 plt.ylabel('Probability')
 plt.xlabel('H_0')
+plt.axvline(x=H_true.value, color='black', label='Planck18 H_0') # H_true
 plt.legend()
 plt.savefig('./output/comparison_hist2_H.png')
 plt.close()
