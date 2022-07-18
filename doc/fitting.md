@@ -10,7 +10,7 @@ In many cases, the lightcurve predicted by each set of parameters is **extremely
 
 ### Creating an injection file
 
-There are other options for creating an injection file, such as a pre-computed simulation set. In this case a prior is still needed, but will only be applied where it is necessary. Taking the Petrov et al. 2022 samples and the Bu2019lm prior as an example:
+There are other options for creating an injection file, such as a pre-computed simulation set. In this case a prior is still needed, but it will only be applied where it is necessary. Taking the Petrov et al. 2022 samples and the Bu2019lm prior as an example:
 
 	nmma_create_injection --injection-file example_files/sim_events/injections.dat --prior-file priors/Bu2019lm.prior --eos-file example_files/eos/ALF2.dat --binary-type BNS --n-injection 100 --original-parameters --extension json --aligned-spin
 
