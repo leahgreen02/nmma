@@ -3,6 +3,7 @@
 import numpy as np
 import scipy.stats
 import warnings
+from astropy import constants as const
 
 def logit(data, bounds, inv_transform=False, include_prior=False):
     '''Use include prior = True to include the logit transform prior
@@ -153,3 +154,13 @@ def index_random_choice(random_state, length, N):
         index = np.random.choice(length, size=N)
 
     return index
+
+def calc_H0(D, z):
+    '''
+    https://arxiv.org/pdf/2008.07420.pdf
+    https://arxiv.org/pdf/1604.01424.pdf
+    '''
+    q0, j0 = -.55, 1
+    c = const.c.to('km/s').value
+    H0 = z * c / D * (1 + 1/2 * (1 - q0) * z - 1/6 * (1 - q0 - 3 * q0**2 + j0) * z**2)
+    return H0

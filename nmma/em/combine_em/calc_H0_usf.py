@@ -76,6 +76,8 @@ def run_event_combination(path_to_events, H_range, D_range, i_range, save_hist=F
         EM_event_files.append(samples)
         event_indices.append(N)
 
+    print(event_folders)
+    print(event_indices)
     with open('../../../injection_usf_1000.json', 'r') as f:
         injection_dict = json.load(f, object_hook=bilby.core.utils.decode_bilby_json)
     injection_df = injection_dict["injections"]
@@ -105,6 +107,13 @@ def run_event_combination(path_to_events, H_range, D_range, i_range, save_hist=F
     original_KDE['cos_inclination_EM'] = i_kde_transform
     original_KDE['H0'] = H_kde_transform
 
+    H_medians = []
+    H_stds = []
+    H_medians.append(np.median(H))
+    H_stds.append(np.std(H))
+
+    N_hist = len(D)
+
     count = 2
     for n, event in zip(event_indices[1:], EM_event_files[1:]):
         print(f'Combining events')
@@ -112,10 +121,12 @@ def run_event_combination(path_to_events, H_range, D_range, i_range, save_hist=F
         D_inj = injection_parameters['luminosity_distance']
         D_kde_result, i_kde, H_kde = combine_EM_events(original_KDE, event, original_D_inj, D_inj, H_range = H_range, D_range = D_range, i_range = i_range, num=n)
         original_KDE = {'luminosity_distance': D_kde_result, 'cos_inclination_EM': i_kde, 'H0': H_kde}
+        H_vals = logit(H_kde.resample(N_hist), H_range, inv_transform=True)
+        H_medians.append(np.median(H_vals))
+        H_stds.append(np.std(H_vals))
         print(f'{count} events combined!')
         count+=1
 
-    N_hist = len(D)
     H_transform_resam = H_kde.resample(N_hist)
     D_transform_resam = D_kde_result.resample(N_hist)
     i_transform_resam = i_kde.resample(N_hist)
@@ -125,18 +136,36 @@ def run_event_combination(path_to_events, H_range, D_range, i_range, save_hist=F
     D_resam = D_transform_resam
     i_resam = logit(i_transform_resam, i_range, inv_transform=True)
 
-    return D_resam.flatten(), i_resam.flatten(), H_resam.flatten()
+    return D_resam.flatten(), i_resam.flatten(), H_resam.flatten(), np.array(H_medians), np.array(H_stds)
 
 
 path_to_events = '../../../usf_runs'
 
-D_combined, i_combined, H_combined = run_event_combination(path_to_events, H_range = [0,200], D_range = [0,2000], i_range = [0,1], save_hist=True)
+D_combined, i_combined, H_combined, H_medians, H_stds = run_event_combination(path_to_events, H_range = [0,200], D_range = [0,2000], i_range = [0,1], save_hist=True)
 
+# histtype='stepfilled'
 plt.figure(figsize=(12,9))
-plt.hist(H_combined, alpha=.8, bins = 30, histtype='stepfilled', density=True, label = 'Combined Events')
+plt.hist(H_combined, alpha=.8, bins = 30, edgecolor = 'black', density=True, label = 'Combined Events')
 plt.ylabel('Probability')
-plt.xlabel('H_0')
-plt.axvline(x=H_true.value, color='black', label='Planck18 H_0') # H_true
+plt.xlabel(r'H$_{0}$ [km/s/Mpc]')
+plt.axvline(x=H_true.value, color='red', linestyle='--', linewidth=4, label=r'Planck18 H$_{0}$') # H_true
 plt.legend()
 plt.savefig('./output/H0_combined_hist_usf.png')
+plt.close()
+
+print(H_stds, H_medians)
+
+#plt.figure(figsize=(12,9))
+f, (ax0, ax1) = plt.subplots(2, 1, figsize=(12,9), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+#plt.hist(H_combined, alpha=.8, bins = 30, edgecolor = 'black', density=True, label = 'Combined Events')
+ax1.plot(np.arange(1,len(H_medians)+1), H_stds/H_true.value, linewidth=3, marker='o')
+#plt.plot(np.arange(1,11), H_stds, marker='o')
+ax0.errorbar(np.arange(1,len(H_medians)+1), H_medians, yerr=H_stds, linewidth=3, capsize=6, label='Combined Event Prediction')
+ax0.axhline(y=H_true.value, color='red', linestyle='--', linewidth=2, label=r'Planck18 H$_{0}$')
+ax0.set_ylabel(r'H$_{0}$ [km/s/Mpc]')
+ax1.set_ylabel(r'Fractional H$_{0}$ Error')
+plt.xlabel(r'Number of Events')
+#plt.axvline(x=H_true.value, color='red', linestyle='--', linewidth=4, label=r'Planck18 H$_{0}$') # H_true
+ax0.legend()
+plt.savefig('./output/H0_error.png')
 plt.close()
