@@ -25,8 +25,8 @@ H_true = Planck18.H(0)
 c = const.c.to('km/s').value
 
 downsample_posterior = True
-#N_draws = 1000
-N_draws = 50000
+N_draws = 100
+#N_draws = 50000
 
 D_range = [0, 500]
 
@@ -84,6 +84,7 @@ def combine_EM_events(original_KDE, EM_event, D_inj, H_range, D_range, transform
 
     return D_joint_kde, H_joint_kde
 
+
 def run_event_combination(H_range, D_range, N_draws=N_draws):
     '''
     '''
@@ -129,8 +130,9 @@ def run_event_combination(H_range, D_range, N_draws=N_draws):
     plt.close()
 
     N_events = 29
+    N_evetns = 3
     percentiles = []
-    event_idxs = random.sample(range(0,29), 29)
+    event_idxs = random.sample(range(0,N_events), N_events)
     for n in event_idxs:
         prefix = f'run{n}_simulation'
         filename = [f for f in event_folders if f.startswith(prefix)][0]
@@ -144,13 +146,10 @@ def run_event_combination(H_range, D_range, N_draws=N_draws):
         original_KDE = {'luminosity_distance': D_kde_result, 'H0': H_kde}
         H_vals = logit(H_kde.resample(N_draws), H_range, inv_transform=True)
         p_value = scipy.stats.percentileofscore(event['luminosity_distance'], D_injs[n]) / 100
-        # use all injections
-        '''
         p_value = min(p_value, 1-p_value)
-        if p_value > 0:
+        if p_value > 0: # no p value cut for now
             H_medians.append(np.median(H_vals))
             H_stds.append(np.std(H_vals))
-        '''
     print(f'Events combined!')
 
     H_transform_resam = H_kde.resample(N_draws)
@@ -196,6 +195,7 @@ plt.legend()
 plt.savefig('./output/all_events/H0_farah_hist_usf.png')
 plt.close()
 
+print(H_stds, H_medians)
 
 f, (ax0, ax1) = plt.subplots(2, 1, figsize=(12,9), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
 ax1.plot(np.arange(1,len(H_medians)+1), H_stds/H_true.value, linewidth=3, marker='o')
@@ -209,3 +209,6 @@ plt.xlabel(r'Number of Events')
 ax0.legend()
 plt.savefig('./output/all_events/H0_error_farah.png')
 plt.close()
+
+np.savetxt('H_medians.txt', H_medians)
+np.savetxt('H_stds.txt', H_stds)
