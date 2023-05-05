@@ -21,7 +21,8 @@ def logit(data, bounds, inv_transform=False, include_prior=False):
 def logit_prior(logit_data):
     '''
     '''
-    prior = np.exp(logit_data)/(1+np.exp(logit_data))*(1-np.exp(logit_data)/(1+np.exp(logit_data))) 
+    #prior = np.exp(logit_data)/(1+np.exp(logit_data))*(1-np.exp(logit_data)/(1+np.exp(logit_data))) 
+    prior = (1+np.exp(-logit_data))**2 * np.exp(-logit_data)
     return prior
 
 def KDE_multiply(KDE1, KDE2, downsample=False,
