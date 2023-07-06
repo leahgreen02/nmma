@@ -1,7 +1,7 @@
 function [combined_posterior] = PART_function(event1, event2)
     run("~/random-tree-parallel-MCMC/src/init.m");
     %options = part_options('cut_type', 'kd', 'resample_N', 10000);
-    options = part_options('cut_type', 'kd', 'resample_N', 50000, 'parallel', false);
+    options = part_options('cut_type', 'kd', 'resample_N', 100000, 'parallel', false);
     sub_chain = cell(1,2);
 
     event1 = reshape(event1, [length(event1), 1]);
