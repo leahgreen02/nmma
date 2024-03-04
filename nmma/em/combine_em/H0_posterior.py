@@ -25,8 +25,8 @@ H_true = Planck18.H(0)
 c = const.c.to('km/s').value
 
 downsample_posterior = True
-#N_draws = 100
-N_draws = 50000
+N_draws = 100
+#N_draws = 50000
 
 D_range = [0, 500]
 
